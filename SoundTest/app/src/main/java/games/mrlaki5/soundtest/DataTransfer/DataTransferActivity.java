@@ -226,8 +226,8 @@ public class DataTransferActivity extends AppCompatActivity implements CallbackS
     //Check if permission for storage are granted and activates dialog
     public void browseFileExplorer(View view) {
         // If Android 11+ require MANAGE_EXTERNAL_STORAGE, check and request
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (!Environment.isExternalStorageManager()) {
+        if (Build.VERSION.SDK_INT >= 30) {
+            if (!isManageAllFilesGranted()) {
                 // set pending so we know to resume into file browser after settings
                 pendingBrowseRequest = PENDING_FILE_BROWSE;
                 requestManageAllFilesPermission();
@@ -270,8 +270,8 @@ public class DataTransferActivity extends AppCompatActivity implements CallbackS
     //Check if permission for storage are granted and activates dialog
     public void browseFolderExplorer(View view){
         // If Android 11+ require MANAGE_EXTERNAL_STORAGE, check and request
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (!Environment.isExternalStorageManager()) {
+        if (Build.VERSION.SDK_INT >= 30) {
+            if (!isManageAllFilesGranted()) {
                 // set pending so we know to resume into folder browser after settings
                 pendingBrowseRequest = PENDING_FOLDER_BROWSE;
                 requestManageAllFilesPermission();
@@ -292,14 +292,31 @@ public class DataTransferActivity extends AppCompatActivity implements CallbackS
     // helper: open settings for All files access
     private void requestManageAllFilesPermission() {
         try {
-            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+            // Use action string to avoid compile-time constant dependency
+            Intent intent = new Intent("android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION",
                     Uri.parse("package:" + getPackageName()));
             startActivityForResult(intent, REQUEST_MANAGE_ALL_FILES);
         } catch (Exception e) {
             // fallback to generic All files access settings
-            Intent intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+            Intent intent = new Intent("android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION");
             startActivityForResult(intent, REQUEST_MANAGE_ALL_FILES);
         }
+    }
+
+    // reflection-based helper to check isExternalStorageManager() so code compiles with older SDKs
+    private boolean isManageAllFilesGranted() {
+        if (Build.VERSION.SDK_INT < 30) return false;
+        try {
+            // call Environment.isExternalStorageManager() reflectively
+            Class<?> envClass = Class.forName("android.os.Environment");
+            java.lang.reflect.Method m = envClass.getMethod("isExternalStorageManager");
+            Object res = m.invoke(null);
+            if (res instanceof Boolean) {
+                return ((Boolean) res).booleanValue();
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
     }
 
     //Fills file browser view with files and folders from current folder
@@ -485,8 +502,8 @@ public class DataTransferActivity extends AppCompatActivity implements CallbackS
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQUEST_MANAGE_ALL_FILES) {
             // user returned from settings - check if access was granted
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                if (Environment.isExternalStorageManager()) {
+            if (Build.VERSION.SDK_INT >= 30) {
+                if (isManageAllFilesGranted()) {
                     // proceed to pending action
                     if (pendingBrowseRequest == PENDING_FILE_BROWSE) {
                         pendingBrowseRequest = PENDING_NONE;
@@ -500,7 +517,7 @@ public class DataTransferActivity extends AppCompatActivity implements CallbackS
                     }
                 } else {
                     // user did not grant access; show a toast
-                    Toast.makeText(this, R.string.all_files_access_not_granted, Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "Please grant All files access to use the file browser.", Toast.LENGTH_LONG).show();
                     pendingBrowseRequest = PENDING_NONE;
                 }
             }
