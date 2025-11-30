@@ -1,11 +1,14 @@
 package games.mrlaki5.soundtest.DataTransfer;
 
 import android.Manifest;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.preference.PreferenceManager;
+import android.provider.Settings;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
@@ -58,6 +61,13 @@ public class DataTransferActivity extends AppCompatActivity implements CallbackS
     private ProgressBar sendingBar=null;
     //Task for receiving data
     private RecordTask listeningTask=null;
+
+    // --- Added fields for MANAGE_EXTERNAL_STORAGE flow ---
+    private static final int REQUEST_MANAGE_ALL_FILES = 200;
+    private static final int PENDING_NONE = 0;
+    private static final int PENDING_FILE_BROWSE = 1;
+    private static final int PENDING_FOLDER_BROWSE = 2;
+    private int pendingBrowseRequest = PENDING_NONE;
 
     //Listener for listView on browsing for file to be sent
     private AdapterView.OnItemClickListener adapSendListener=new AdapterView.OnItemClickListener() {
@@ -215,6 +225,16 @@ public class DataTransferActivity extends AppCompatActivity implements CallbackS
 
     //Check if permission for storage are granted and activates dialog
     public void browseFileExplorer(View view) {
+        // If Android 11+ require MANAGE_EXTERNAL_STORAGE, check and request
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                // set pending so we know to resume into file browser after settings
+                pendingBrowseRequest = PENDING_FILE_BROWSE;
+                requestManageAllFilesPermission();
+                return;
+            }
+        }
+
         if (ContextCompat.checkSelfPermission(this,
                 Manifest.permission.WRITE_EXTERNAL_STORAGE)
                 != PackageManager.PERMISSION_GRANTED) {
@@ -249,6 +269,16 @@ public class DataTransferActivity extends AppCompatActivity implements CallbackS
 
     //Check if permission for storage are granted and activates dialog
     public void browseFolderExplorer(View view){
+        // If Android 11+ require MANAGE_EXTERNAL_STORAGE, check and request
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                // set pending so we know to resume into folder browser after settings
+                pendingBrowseRequest = PENDING_FOLDER_BROWSE;
+                requestManageAllFilesPermission();
+                return;
+            }
+        }
+
         if (ContextCompat.checkSelfPermission(this,
                 Manifest.permission.WRITE_EXTERNAL_STORAGE)
                 != PackageManager.PERMISSION_GRANTED) {
@@ -256,6 +286,19 @@ public class DataTransferActivity extends AppCompatActivity implements CallbackS
                     new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
         } else {
             browseFolderExplorer();
+        }
+    }
+
+    // helper: open settings for All files access
+    private void requestManageAllFilesPermission() {
+        try {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:" + getPackageName()));
+            startActivityForResult(intent, REQUEST_MANAGE_ALL_FILES);
+        } catch (Exception e) {
+            // fallback to generic All files access settings
+            Intent intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+            startActivityForResult(intent, REQUEST_MANAGE_ALL_FILES);
         }
     }
 
@@ -432,6 +475,34 @@ public class DataTransferActivity extends AppCompatActivity implements CallbackS
                     browseFolderExplorer();
                 }
                 break;
+            }
+        }
+    }
+
+    // handle return from All files access settings
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_MANAGE_ALL_FILES) {
+            // user returned from settings - check if access was granted
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                if (Environment.isExternalStorageManager()) {
+                    // proceed to pending action
+                    if (pendingBrowseRequest == PENDING_FILE_BROWSE) {
+                        pendingBrowseRequest = PENDING_NONE;
+                        // start file browser (private method)
+                        browseFileExplorer();
+                    } else if (pendingBrowseRequest == PENDING_FOLDER_BROWSE) {
+                        pendingBrowseRequest = PENDING_NONE;
+                        browseFolderExplorer();
+                    } else {
+                        // nothing pending
+                    }
+                } else {
+                    // user did not grant access; show a toast
+                    Toast.makeText(this, R.string.all_files_access_not_granted, Toast.LENGTH_LONG).show();
+                    pendingBrowseRequest = PENDING_NONE;
+                }
             }
         }
     }
